@@ -1,0 +1,228 @@
+pipeline {
+    agent any
+    
+    environment {
+        // Repositorio de desarrollo donde está el código fuente
+        DEV_REPO = 'https://github.com/SantiagoAngel007/microservice-app-example.git'
+        DEV_BRANCH = 'feature/test-startup'
+        
+        // Variables de configuración
+        JWT_SECRET = 'PRFT'
+        REDIS_HOST = 'redis'
+        REDIS_PORT = '6379'
+        REDIS_CHANNEL = 'log_channel'
+        
+        // Puertos de los servicios
+        AUTH_API_PORT = '8000'
+        USERS_API_PORT = '8083'
+        TODOS_API_PORT = '8082'
+        FRONTEND_PORT = '8080'
+        
+        // Network name
+        NETWORK_NAME = 'microservice-network'
+    }
+    
+    stages {
+        stage('Checkout Development Code') {
+            steps {
+                script {
+                    echo "Clonando repositorio de desarrollo..."
+                    sh "rm -rf microservice-app-example"
+                    sh "git clone ${DEV_REPO} microservice-app-example"
+                    sh "cd microservice-app-example && git checkout ${DEV_BRANCH}"
+                }
+            }
+        }
+        
+        stage('Create Docker Network') {
+            steps {
+                script {
+                    echo "Creando red de Docker..."
+                    sh """
+                        docker network inspect ${NETWORK_NAME} >/dev/null 2>&1 || docker network create ${NETWORK_NAME}
+                    """
+                }
+            }
+        }
+        
+        stage('Start Redis') {
+            steps {
+                script {
+                    echo "Iniciando Redis..."
+                    sh """
+                        docker run -d --name redis \
+                            --network ${NETWORK_NAME} \
+                            -p 6379:6379 \
+                            redis:7-alpine \
+                            redis-server --appendonly yes
+                    """
+                }
+            }
+        }
+        
+        stage('Build and Start Auth API') {
+            steps {
+                script {
+                    echo "Construyendo y desplegando Auth API..."
+                    dir('microservice-app-example/auth-api') {
+                        sh """
+                            docker build -t auth-api .
+                            docker run -d --name auth-api \
+                                --network ${NETWORK_NAME} \
+                                -p ${AUTH_API_PORT}:8000 \
+                                -e AUTH_API_PORT=8000 \
+                                -e USERS_API_ADDRESS=http://users-api:8083 \
+                                -e JWT_SECRET=${JWT_SECRET} \
+                                auth-api
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Build and Start Users API') {
+            steps {
+                script {
+                    echo "Construyendo y desplegando Users API..."
+                    dir('microservice-app-example/users-api') {
+                        sh """
+                            ./mvnw clean package -DskipTests
+                            docker build -t users-api .
+                            docker run -d --name users-api \
+                                --network ${NETWORK_NAME} \
+                                -p ${USERS_API_PORT}:8083 \
+                                -e SERVER_PORT=8083 \
+                                -e JWT_SECRET=${JWT_SECRET} \
+                                users-api
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Build and Start Todos API') {
+            steps {
+                script {
+                    echo "Construyendo y desplegando Todos API..."
+                    dir('microservice-app-example/todos-api') {
+                        sh """
+                            docker build -t todos-api .
+                            docker run -d --name todos-api \
+                                --network ${NETWORK_NAME} \
+                                -p ${TODOS_API_PORT}:8082 \
+                                -e TODO_API_PORT=8082 \
+                                -e JWT_SECRET=${JWT_SECRET} \
+                                -e REDIS_HOST=${REDIS_HOST} \
+                                -e REDIS_PORT=${REDIS_PORT} \
+                                -e REDIS_CHANNEL=${REDIS_CHANNEL} \
+                                todos-api
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Build and Start Log Message Processor') {
+            steps {
+                script {
+                    echo "Construyendo y desplegando Log Message Processor..."
+                    dir('microservice-app-example/log-message-processor') {
+                        sh """
+                            docker build -t log-message-processor .
+                            docker run -d --name log-message-processor \
+                                --network ${NETWORK_NAME} \
+                                -e REDIS_HOST=${REDIS_HOST} \
+                                -e REDIS_PORT=${REDIS_PORT} \
+                                -e REDIS_CHANNEL=${REDIS_CHANNEL} \
+                                log-message-processor
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Build and Start Frontend') {
+            steps {
+                script {
+                    echo "Construyendo y desplegando Frontend..."
+                    dir('microservice-app-example/frontend') {
+                        sh """
+                            docker build -t frontend .
+                            docker run -d --name frontend \
+                                --network ${NETWORK_NAME} \
+                                -p ${FRONTEND_PORT}:8080 \
+                                -e PORT=8080 \
+                                -e AUTH_API_ADDRESS=http://localhost:${AUTH_API_PORT} \
+                                -e TODOS_API_ADDRESS=http://localhost:${TODOS_API_PORT} \
+                                frontend
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Health Check') {
+            steps {
+                script {
+                    echo "Verificando que todos los servicios estén funcionando..."
+                    sleep(30) // Esperar a que los servicios se inicialicen
+                    
+                    // Verificar Auth API
+                    sh """
+                        curl -f http://localhost:${AUTH_API_PORT}/version || exit 1
+                    """
+                    
+                    // Verificar Users API (requiere token, solo verificamos que responda)
+                    sh """
+                        curl -f http://localhost:${USERS_API_PORT}/users/ -H "Authorization: Bearer invalid" || true
+                    """
+                    
+                    // Verificar Frontend
+                    sh """
+                        curl -f http://localhost:${FRONTEND_PORT}/ || exit 1
+                    """
+                    
+                    echo "Todos los servicios están funcionando correctamente!"
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                echo "Limpiando workspace..."
+                sh "rm -rf microservice-app-example"
+            }
+        }
+        
+        success {
+            echo """
+            ✅ Despliegue completado exitosamente!
+            
+            Servicios disponibles:
+            - Frontend: http://localhost:${FRONTEND_PORT}
+            - Auth API: http://localhost:${AUTH_API_PORT}
+            - Users API: http://localhost:${USERS_API_PORT}
+            - Todos API: http://localhost:${TODOS_API_PORT}
+            - Redis: localhost:6379
+            
+            Para detener todos los servicios, ejecuta el pipeline Jenkinsfile-Destroy
+            """
+        }
+        
+        failure {
+            echo """
+            ❌ El despliegue falló. 
+            Ejecutando limpieza de contenedores...
+            """
+            script {
+                sh """
+                    docker stop frontend todos-api log-message-processor users-api auth-api redis 2>/dev/null || true
+                    docker rm frontend todos-api log-message-processor users-api auth-api redis 2>/dev/null || true
+                    docker network rm ${NETWORK_NAME} 2>/dev/null || true
+                """
+            }
+        }
+    }
+}

@@ -1,0 +1,192 @@
+pipeline {
+    agent any
+    
+    environment {
+        // Network name
+        NETWORK_NAME = 'microservice-network'
+        
+        // Lista de contenedores de la aplicación
+        CONTAINERS = 'frontend todos-api log-message-processor users-api auth-api redis'
+        
+        // Lista de imágenes de la aplicación
+        IMAGES = 'frontend todos-api log-message-processor users-api auth-api'
+    }
+    
+    stages {
+        stage('Stop Services') {
+            steps {
+                script {
+                    echo "Deteniendo todos los servicios..."
+                    
+                    // Detener contenedores uno por uno para mejor control
+                    def containers = ['frontend', 'todos-api', 'log-message-processor', 'users-api', 'auth-api', 'redis']
+                    
+                    containers.each { container ->
+                        try {
+                            echo "Deteniendo ${container}..."
+                            sh "docker stop ${container}"
+                            echo "✅ ${container} detenido correctamente"
+                        } catch (Exception e) {
+                            echo "⚠️ ${container} no estaba ejecutándose o ya fue detenido"
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Remove Containers') {
+            steps {
+                script {
+                    echo "Removiendo contenedores..."
+                    
+                    def containers = ['frontend', 'todos-api', 'log-message-processor', 'users-api', 'auth-api', 'redis']
+                    
+                    containers.each { container ->
+                        try {
+                            echo "Removiendo contenedor ${container}..."
+                            sh "docker rm ${container}"
+                            echo "✅ Contenedor ${container} removido correctamente"
+                        } catch (Exception e) {
+                            echo "⚠️ Contenedor ${container} no existe o ya fue removido"
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Remove Images') {
+            steps {
+                script {
+                    echo "Removiendo imágenes de Docker..."
+                    
+                    def images = ['frontend', 'todos-api', 'log-message-processor', 'users-api', 'auth-api']
+                    
+                    images.each { image ->
+                        try {
+                            echo "Removiendo imagen ${image}..."
+                            sh "docker rmi ${image}"
+                            echo "✅ Imagen ${image} removida correctamente"
+                        } catch (Exception e) {
+                            echo "⚠️ Imagen ${image} no existe o está siendo usada por otro contenedor"
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Remove Network') {
+            steps {
+                script {
+                    echo "Removiendo red de Docker..."
+                    try {
+                        sh "docker network rm ${NETWORK_NAME}"
+                        echo "✅ Red ${NETWORK_NAME} removida correctamente"
+                    } catch (Exception e) {
+                        echo "⚠️ Red ${NETWORK_NAME} no existe o ya fue removida"
+                    }
+                }
+            }
+        }
+        
+        stage('Clean Up Volumes') {
+            steps {
+                script {
+                    echo "Limpiando volúmenes no utilizados..."
+                    try {
+                        sh "docker volume prune -f"
+                        echo "✅ Volúmenes no utilizados limpiados"
+                    } catch (Exception e) {
+                        echo "⚠️ Error al limpiar volúmenes: ${e.getMessage()}"
+                    }
+                }
+            }
+        }
+        
+        stage('System Cleanup') {
+            steps {
+                script {
+                    echo "Realizando limpieza general del sistema Docker..."
+                    try {
+                        // Limpiar contenedores detenidos, redes no utilizadas, imágenes colgantes
+                        sh "docker system prune -f"
+                        echo "✅ Limpieza general completada"
+                    } catch (Exception e) {
+                        echo "⚠️ Error en limpieza general: ${e.getMessage()}"
+                    }
+                }
+            }
+        }
+        
+        stage('Verification') {
+            steps {
+                script {
+                    echo "Verificando que todos los servicios hayan sido removidos..."
+                    
+                    // Verificar que no hay contenedores corriendo
+                    def runningContainers = sh(
+                        script: "docker ps --format '{{.Names}}' | grep -E '(frontend|todos-api|log-message-processor|users-api|auth-api|redis)' || true",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (runningContainers) {
+                        echo "⚠️ Aún hay contenedores ejecutándose: ${runningContainers}"
+                        error("No todos los contenedores fueron detenidos correctamente")
+                    } else {
+                        echo "✅ No hay contenedores de la aplicación ejecutándose"
+                    }
+                    
+                    // Verificar que la red fue removida
+                    def networkExists = sh(
+                        script: "docker network ls | grep ${NETWORK_NAME} || true",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (networkExists) {
+                        echo "⚠️ La red ${NETWORK_NAME} aún existe"
+                    } else {
+                        echo "✅ La red ${NETWORK_NAME} fue removida correctamente"
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo """
+            ✅ Destrucción completada exitosamente!
+            
+            Todos los servicios han sido detenidos y removidos:
+            ❌ Frontend
+            ❌ Todos API  
+            ❌ Log Message Processor
+            ❌ Users API
+            ❌ Auth API
+            ❌ Redis
+            ❌ Red Docker: ${NETWORK_NAME}
+            
+            El sistema está limpio y listo para un nuevo despliegue.
+            """
+        }
+        
+        failure {
+            echo """
+            ⚠️ La destrucción tuvo algunos problemas.
+            
+            Puede que algunos recursos no hayan sido removidos completamente.
+            Verifica manualmente con:
+            - docker ps -a
+            - docker images
+            - docker network ls
+            
+            Si es necesario, ejecuta manualmente:
+            - docker stop \$(docker ps -aq)
+            - docker system prune -af
+            """
+        }
+        
+        always {
+            echo "🧹 Pipeline de destrucción finalizado"
+        }
+    }
+}
