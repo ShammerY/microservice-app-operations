@@ -2,11 +2,8 @@ pipeline {
     agent any
     
     environment {
-        // Repositorio de desarrollo donde está el código fuente
         DEV_REPO = 'https://github.com/SantiagoAngel007/microservice-app-example.git'
         DEV_BRANCH = 'feature/test-startup'
-        
-        // Variables de configuración para build
         IMAGE_TAG = "${BUILD_NUMBER}"
         REGISTRY_PREFIX = 'microservices'
     }
@@ -14,334 +11,108 @@ pipeline {
     stages {
         stage('Checkout Development Code') {
             steps {
-                script {
-                    echo "📥 Clonando repositorio de desarrollo..."
-                    sh "rm -rf microservice-app-example"
-                    sh "git clone ${DEV_REPO} microservice-app-example"
-                    sh "cd microservice-app-example && git checkout ${DEV_BRANCH}"
-                    
-                    // Mostrar información del commit y estructura
-                    sh """
-                        cd microservice-app-example
-                        echo "📋 Información del commit:"
-                        git log --oneline -1
-                        echo "🌿 Rama: ${DEV_BRANCH}"
-                        echo "🏷️ Tag de imagen: ${IMAGE_TAG}"
-                        echo ""
-                        echo "📁 Estructura del proyecto:"
-                        ls -la
-                        echo ""
-                        echo "📁 Contenido de auth-api:"
-                        ls -la auth-api/
-                    """
-                }
+                sh "rm -rf microservice-app-example"
+                sh "git clone ${DEV_REPO} microservice-app-example"
+                sh "cd microservice-app-example && git checkout ${DEV_BRANCH}"
             }
         }
         
         stage('Cleanup Old Images') {
             steps {
-                script {
-                    echo "🧹 Limpiando imágenes anteriores..."
-                    sh '''
-                        # Remover imágenes previas para build fresco
-                        docker rmi ${REGISTRY_PREFIX}/auth-api:latest 2>/dev/null || true
-                        docker rmi ${REGISTRY_PREFIX}/users-api:latest 2>/dev/null || true
-                        docker rmi ${REGISTRY_PREFIX}/todos-api:latest 2>/dev/null || true
-                        docker rmi ${REGISTRY_PREFIX}/log-message-processor:latest 2>/dev/null || true
-                        docker rmi ${REGISTRY_PREFIX}/frontend:latest 2>/dev/null || true
-                        
-                        # También limpiar por tag específico
-                        docker rmi ${REGISTRY_PREFIX}/auth-api:${IMAGE_TAG} 2>/dev/null || true
-                        docker rmi ${REGISTRY_PREFIX}/users-api:${IMAGE_TAG} 2>/dev/null || true
-                        docker rmi ${REGISTRY_PREFIX}/todos-api:${IMAGE_TAG} 2>/dev/null || true
-                        docker rmi ${REGISTRY_PREFIX}/log-message-processor:${IMAGE_TAG} 2>/dev/null || true
-                        docker rmi ${REGISTRY_PREFIX}/frontend:${IMAGE_TAG} 2>/dev/null || true
-                        
-                        echo "✅ Limpieza de imágenes completada"
-                    '''
-                }
-            }
-        }
-        
-        stage('Prepare Go Modules for Auth API') {
-            steps {
-                script {
-                    echo "🔧 Preparando módulos Go para Auth API..."
-                    dir('microservice-app-example/auth-api') {
-                        sh '''
-                            echo "📋 Verificando archivos existentes:"
-                            ls -la
-                            
-                            # Si no existe go.mod, crearlo desde Gopkg
-                            if [ ! -f go.mod ]; then
-                                echo "📦 Inicializando módulo Go..."
-                                export GO111MODULE=on
-                                go mod init github.com/bortizf/microservice-app-example/auth-api
-                                
-                                # Si existe Gopkg.toml, convertir dependencias
-                                if [ -f Gopkg.toml ]; then
-                                    echo "🔄 Convirtiendo desde Gopkg..."
-                                    # Agregar dependencias manualmente basadas en el Gopkg.toml
-                                    go get github.com/dgrijalva/jwt-go@v3.1.0
-                                    go get github.com/labstack/echo@v3.2.6
-                                    go get github.com/openzipkin/zipkin-go@master
-                                fi
-                                
-                                echo "🔄 Descargando dependencias..."
-                                go mod tidy
-                            fi
-                            
-                            echo "✅ Módulos Go preparados:"
-                            cat go.mod
-                        '''
-                    }
-                }
+                sh '''
+                    docker rmi ${REGISTRY_PREFIX}/auth-api:latest 2>/dev/null || true
+                    docker rmi ${REGISTRY_PREFIX}/users-api:latest 2>/dev/null || true
+                    docker rmi ${REGISTRY_PREFIX}/todos-api:latest 2>/dev/null || true
+                    docker rmi ${REGISTRY_PREFIX}/log-message-processor:latest 2>/dev/null || true
+                    docker rmi ${REGISTRY_PREFIX}/frontend:latest 2>/dev/null || true
+                    docker rmi ${REGISTRY_PREFIX}/auth-api:${IMAGE_TAG} 2>/dev/null || true
+                    docker rmi ${REGISTRY_PREFIX}/users-api:${IMAGE_TAG} 2>/dev/null || true
+                    docker rmi ${REGISTRY_PREFIX}/todos-api:${IMAGE_TAG} 2>/dev/null || true
+                    docker rmi ${REGISTRY_PREFIX}/log-message-processor:${IMAGE_TAG} 2>/dev/null || true
+                    docker rmi ${REGISTRY_PREFIX}/frontend:${IMAGE_TAG} 2>/dev/null || true
+                '''
             }
         }
         
         stage('Build Auth API') {
             steps {
-                script {
-                    echo "🔐 Construyendo Auth API..."
-                    dir('microservice-app-example/auth-api') {
-                        sh """
-                            echo "🏗️ Building Auth API Docker image..."
-                            docker build -t ${REGISTRY_PREFIX}/auth-api:latest .
-                            docker tag ${REGISTRY_PREFIX}/auth-api:latest ${REGISTRY_PREFIX}/auth-api:${IMAGE_TAG}
-                            
-                            echo "✅ Auth API imagen creada:"
-                            docker images | grep ${REGISTRY_PREFIX}/auth-api
-                        """
-                    }
+                dir('microservice-app-example/auth-api') {
+                    sh """
+                        docker build -t ${REGISTRY_PREFIX}/auth-api:latest .
+                        docker tag ${REGISTRY_PREFIX}/auth-api:latest ${REGISTRY_PREFIX}/auth-api:${IMAGE_TAG}
+                    """
                 }
             }
         }
         
         stage('Build Users API') {
             steps {
-                script {
-                    echo "👥 Construyendo Users API..."
-                    dir('microservice-app-example/users-api') {
-                        sh """
-                            echo "📋 Verificando estructura Maven:"
-                            ls -la
-                            
-                            echo "🏗️ Compilando con Maven..."
-                            ./mvnw clean package -DskipTests
-                            
-                            echo "🏗️ Building Users API Docker image..."
-                            docker build -t ${REGISTRY_PREFIX}/users-api:latest .
-                            docker tag ${REGISTRY_PREFIX}/users-api:latest ${REGISTRY_PREFIX}/users-api:${IMAGE_TAG}
-                            
-                            echo "✅ Users API imagen creada:"
-                            docker images | grep ${REGISTRY_PREFIX}/users-api
-                        """
-                    }
+                dir('microservice-app-example/users-api') {
+                    sh """
+                        docker build -t ${REGISTRY_PREFIX}/users-api:latest .
+                        docker tag ${REGISTRY_PREFIX}/users-api:latest ${REGISTRY_PREFIX}/users-api:${IMAGE_TAG}
+                    """
                 }
             }
         }
         
         stage('Build Todos API') {
             steps {
-                script {
-                    echo "📝 Construyendo Todos API..."
-                    dir('microservice-app-example/todos-api') {
-                        sh """
-                            echo "📋 Verificando package.json:"
-                            ls -la
-                            cat package.json
-                            
-                            echo "🏗️ Building Todos API Docker image..."
-                            docker build -t ${REGISTRY_PREFIX}/todos-api:latest .
-                            docker tag ${REGISTRY_PREFIX}/todos-api:latest ${REGISTRY_PREFIX}/todos-api:${IMAGE_TAG}
-                            
-                            echo "✅ Todos API imagen creada:"
-                            docker images | grep ${REGISTRY_PREFIX}/todos-api
-                        """
-                    }
+                dir('microservice-app-example/todos-api') {
+                    sh """
+                        docker build -t ${REGISTRY_PREFIX}/todos-api:latest .
+                        docker tag ${REGISTRY_PREFIX}/todos-api:latest ${REGISTRY_PREFIX}/todos-api:${IMAGE_TAG}
+                    """
                 }
             }
         }
         
         stage('Build Log Message Processor') {
             steps {
-                script {
-                    echo "📊 Construyendo Log Message Processor..."
-                    dir('microservice-app-example/log-message-processor') {
-                        sh """
-                            echo "📋 Verificando requirements.txt:"
-                            ls -la
-                            cat requirements.txt
-                            
-                            echo "🏗️ Building Log Processor Docker image..."
-                            docker build -t ${REGISTRY_PREFIX}/log-message-processor:latest .
-                            docker tag ${REGISTRY_PREFIX}/log-message-processor:latest ${REGISTRY_PREFIX}/log-message-processor:${IMAGE_TAG}
-                            
-                            echo "✅ Log Processor imagen creada:"
-                            docker images | grep ${REGISTRY_PREFIX}/log-message-processor
-                        """
-                    }
+                dir('microservice-app-example/log-message-processor') {
+                    sh """
+                        docker build -t ${REGISTRY_PREFIX}/log-message-processor:latest .
+                        docker tag ${REGISTRY_PREFIX}/log-message-processor:latest ${REGISTRY_PREFIX}/log-message-processor:${IMAGE_TAG}
+                    """
                 }
             }
         }
         
         stage('Build Frontend') {
             steps {
-                script {
-                    echo "🖥️ Construyendo Frontend..."
-                    dir('microservice-app-example/frontend') {
-                        sh """
-                            echo "📋 Verificando package.json:"
-                            ls -la
-                            head -20 package.json
-                            
-                            echo "🏗️ Building Frontend Docker image..."
-                            docker build -t ${REGISTRY_PREFIX}/frontend:latest .
-                            docker tag ${REGISTRY_PREFIX}/frontend:latest ${REGISTRY_PREFIX}/frontend:${IMAGE_TAG}
-                            
-                            echo "✅ Frontend imagen creada:"
-                            docker images | grep ${REGISTRY_PREFIX}/frontend
-                        """
-                    }
-                }
-            }
-        }
-        
-        stage('Verify All Images') {
-            steps {
-                script {
-                    echo "🔍 Verificando que todas las imágenes se crearon correctamente..."
+                dir('microservice-app-example/frontend') {
                     sh """
-                        echo "📊 Resumen de imágenes creadas:"
-                        echo "════════════════════════════════════════════════════════════"
-                        docker images | grep ${REGISTRY_PREFIX} | head -10
-                        echo "════════════════════════════════════════════════════════════"
-                        
-                        # Verificar que cada imagen existe
-                        echo "🔍 Verificación individual:"
-                        docker inspect ${REGISTRY_PREFIX}/auth-api:latest >/dev/null 2>&1 && echo "✅ Auth API: OK" || echo "❌ Auth API: MISSING"
-                        docker inspect ${REGISTRY_PREFIX}/users-api:latest >/dev/null 2>&1 && echo "✅ Users API: OK" || echo "❌ Users API: MISSING"
-                        docker inspect ${REGISTRY_PREFIX}/todos-api:latest >/dev/null 2>&1 && echo "✅ Todos API: OK" || echo "❌ Todos API: MISSING"
-                        docker inspect ${REGISTRY_PREFIX}/log-message-processor:latest >/dev/null 2>&1 && echo "✅ Log Processor: OK" || echo "❌ Log Processor: MISSING"
-                        docker inspect ${REGISTRY_PREFIX}/frontend:latest >/dev/null 2>&1 && echo "✅ Frontend: OK" || echo "❌ Frontend: MISSING"
-                        
-                        # Contar imágenes creadas
-                        CREATED_IMAGES=\$(docker images | grep ${REGISTRY_PREFIX} | grep latest | wc -l)
-                        echo ""
-                        echo "📊 Total de imágenes creadas: \$CREATED_IMAGES/5"
-                        
-                        if [ "\$CREATED_IMAGES" != "5" ]; then
-                            echo "❌ Error: No se crearon todas las imágenes"
-                            exit 1
-                        else
-                            echo "✅ Todas las imágenes se crearon exitosamente"
-                        fi
+                        docker build -t ${REGISTRY_PREFIX}/frontend:latest .
+                        docker tag ${REGISTRY_PREFIX}/frontend:latest ${REGISTRY_PREFIX}/frontend:${IMAGE_TAG}
                     """
                 }
             }
         }
         
-        stage('Image Size Analysis') {
+        stage('Verify Images') {
             steps {
-                script {
-                    echo "📊 Análisis del tamaño de imágenes..."
-                    sh """
-                        echo "📏 Tamaño de las imágenes creadas:"
-                        echo "════════════════════════════════════════════════════════════"
-                        docker images | grep ${REGISTRY_PREFIX} | grep latest | awk '{printf "%-30s %s\\n", \$1\":\"\$2, \$7}'
-                        echo "════════════════════════════════════════════════════════════"
-                        
-                        echo "💾 Uso total de espacio:"
-                        docker system df | grep Images
-                    """
-                }
-            }
-        }
-        
-        stage('Image Cleanup') {
-            steps {
-                script {
-                    echo "🧹 Limpieza de imágenes intermedias..."
-                    sh """
-                        # Limpiar imágenes huérfanas del build
-                        docker image prune -f
-                        
-                        echo "📊 Espacio liberado y estado final:"
-                        docker system df
-                    """
-                }
+                sh """
+                    docker inspect ${REGISTRY_PREFIX}/auth-api:latest >/dev/null 2>&1 && echo "Auth API: OK" || exit 1
+                    docker inspect ${REGISTRY_PREFIX}/users-api:latest >/dev/null 2>&1 && echo "Users API: OK" || exit 1
+                    docker inspect ${REGISTRY_PREFIX}/todos-api:latest >/dev/null 2>&1 && echo "Todos API: OK" || exit 1
+                    docker inspect ${REGISTRY_PREFIX}/log-message-processor:latest >/dev/null 2>&1 && echo "Log Processor: OK" || exit 1
+                    docker inspect ${REGISTRY_PREFIX}/frontend:latest >/dev/null 2>&1 && echo "Frontend: OK" || exit 1
+                """
             }
         }
     }
     
     post {
         always {
-            script {
-                echo "🧹 Limpiando workspace..."
-                sh "rm -rf microservice-app-example"
-            }
+            sh "rm -rf microservice-app-example"
         }
         
         success {
-            echo """
-            🎉 ¡BUILD COMPLETADO EXITOSAMENTE!
-            
-            🌿 Rama compilada: ${DEV_BRANCH}
-            🏷️ Tag de imágenes: ${IMAGE_TAG}
-            
-            📦 Imágenes creadas:
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            🔐 ${REGISTRY_PREFIX}/auth-api:latest
-            👥 ${REGISTRY_PREFIX}/users-api:latest  
-            📝 ${REGISTRY_PREFIX}/todos-api:latest
-            📊 ${REGISTRY_PREFIX}/log-message-processor:latest
-            🖥️ ${REGISTRY_PREFIX}/frontend:latest
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            
-            ➡️ Próximo paso: Ejecutar microservice-create para crear contenedores
-            
-            💡 Comando de verificación:
-            docker images | grep ${REGISTRY_PREFIX}
-            """
-            
-            script {
-                sh """
-                    echo "📊 Resumen final:"
-                    docker images | grep ${REGISTRY_PREFIX} | wc -l | awk '{print "Imágenes creadas: " \$1 "/5"}'
-                """
-            }
+            echo "Build completed successfully. Images ready for deployment."
         }
         
         failure {
-            echo """
-            ❌ BUILD FALLIDO
-            
-            🔍 Revisa los logs para identificar qué imagen falló al construirse.
-            
-            🛠️ Posibles problemas y soluciones:
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            • Auth API: Problemas con Go modules → Verificar Dockerfile y dependencias
-            • Users API: Problemas con Maven → Verificar ./mvnw permisos y pom.xml
-            • Todos API: Problemas con npm → Verificar package.json
-            • Log Processor: Problemas con pip → Verificar requirements.txt
-            • Frontend: Problemas con build → Verificar dependencias Vue
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            """
-            script {
-                sh """
-                    echo "🧹 Limpiando imágenes parciales que puedan haber quedado..."
-                    
-                    # Mostrar qué imágenes se crearon parcialmente
-                    echo "📊 Estado actual de imágenes:"
-                    docker images | grep ${REGISTRY_PREFIX} || echo "No hay imágenes de microservicios"
-                    
-                    # Limpiar imágenes con problemas
-                    docker image prune -f
-                    
-                    # Forzar limpieza de imágenes problemáticas
-                    docker images | grep '<none>' | awk '{print \$3}' | xargs -r docker rmi -f || true
-                """
-            }
+            sh "docker image prune -f"
         }
     }
 }
