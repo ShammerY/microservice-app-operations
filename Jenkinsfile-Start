@@ -1,0 +1,412 @@
+pipeline {
+    agent any
+    
+    environment {
+        // Variables de configuración
+        AUTH_API_PORT = '8000'
+        USERS_API_PORT = '8083'
+        TODOS_API_PORT = '8082'
+        FRONTEND_PORT = '8080'
+    }
+    
+    stages {
+        stage('Verify Containers Exist') {
+            steps {
+                script {
+                    echo "🔍 Verificando que los contenedores existan..."
+                    
+                    def containers = ['redis', 'auth-api', 'users-api', 'todos-api', 'log-message-processor', 'frontend']
+                    def missingContainers = []
+                    
+                    containers.each { container ->
+                        def exists = sh(
+                            script: "docker ps -aq -f name=${container}",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (exists) {
+                            // Verificar el estado actual
+                            def status = sh(
+                                script: "docker inspect ${container} --format '{{.State.Status}}'",
+                                returnStdout: true
+                            ).trim()
+                            
+                            echo "✅ ${container}: Existe (Estado: ${status})"
+                        } else {
+                            echo "❌ ${container}: No existe"
+                            missingContainers.add(container)
+                        }
+                    }
+                    
+                    if (missingContainers.size() > 0) {
+                        error("❌ Faltan los siguientes contenedores: ${missingContainers.join(', ')}. Ejecuta Jenkinsfile-Create primero.")
+                    }
+                    
+                    echo "✅ Todos los contenedores están disponibles!"
+                }
+            }
+        }
+        
+        stage('Stop Running Containers') {
+            steps {
+                script {
+                    echo "🛑 Deteniendo contenedores que puedan estar corriendo..."
+                    
+                    def containers = ['redis', 'auth-api', 'users-api', 'todos-api', 'log-message-processor', 'frontend']
+                    
+                    containers.each { container ->
+                        def isRunning = sh(
+                            script: "docker ps -q -f name=${container}",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (isRunning) {
+                            echo "🛑 Deteniendo: ${container}"
+                            sh "docker stop ${container}"
+                        } else {
+                            echo "⏹️ ${container}: Ya está detenido"
+                        }
+                    }
+                    
+                    echo "✅ Todos los contenedores están detenidos"
+                }
+            }
+        }
+        
+        stage('Start Redis') {
+            steps {
+                script {
+                    echo "🔴 Iniciando Redis..."
+                    sh "docker start redis"
+                    
+                    echo "⏳ Esperando que Redis se inicialice..."
+                    sleep(5)
+                    
+                    // Verificar que Redis está corriendo
+                    def isRunning = sh(
+                        script: "docker ps -q -f name=redis",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (isRunning) {
+                        echo "✅ Redis iniciado correctamente"
+                        sh "docker logs redis --tail 3"
+                    } else {
+                        error("❌ Redis falló al iniciar")
+                    }
+                }
+            }
+        }
+        
+        stage('Start Auth API') {
+            steps {
+                script {
+                    echo "🔐 Iniciando Auth API..."
+                    sh "docker start auth-api"
+                    
+                    echo "⏳ Esperando que Auth API se inicialice..."
+                    sleep(10)
+                    
+                    // Verificar que Auth API está corriendo
+                    def isRunning = sh(
+                        script: "docker ps -q -f name=auth-api",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (isRunning) {
+                        echo "✅ Auth API iniciado correctamente"
+                        
+                        // Intentar health check
+                        def healthCheck = sh(
+                            script: "curl -f http://localhost:${AUTH_API_PORT}/version || echo 'Health check failed'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        echo "🔍 Health check: ${healthCheck}"
+                    } else {
+                        echo "❌ Auth API falló al iniciar"
+                        sh "docker logs auth-api --tail 10"
+                        error("Auth API startup failed")
+                    }
+                }
+            }
+        }
+        
+        stage('Start Users API') {
+            steps {
+                script {
+                    echo "👥 Iniciando Users API..."
+                    sh "docker start users-api"
+                    
+                    echo "⏳ Esperando que Users API se inicialice..."
+                    sleep(15)
+                    
+                    // Verificar que Users API está corriendo
+                    def isRunning = sh(
+                        script: "docker ps -q -f name=users-api",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (isRunning) {
+                        echo "✅ Users API iniciado correctamente"
+                        sh "docker logs users-api --tail 5"
+                    } else {
+                        echo "❌ Users API falló al iniciar"
+                        sh "docker logs users-api --tail 10"
+                        error("Users API startup failed")
+                    }
+                }
+            }
+        }
+        
+        stage('Start Todos API') {
+            steps {
+                script {
+                    echo "📝 Iniciando Todos API..."
+                    sh "docker start todos-api"
+                    
+                    echo "⏳ Esperando que Todos API se inicialice..."
+                    sleep(10)
+                    
+                    // Verificar que Todos API está corriendo
+                    def isRunning = sh(
+                        script: "docker ps -q -f name=todos-api",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (isRunning) {
+                        echo "✅ Todos API iniciado correctamente"
+                        sh "docker logs todos-api --tail 5"
+                    } else {
+                        echo "❌ Todos API falló al iniciar"
+                        sh "docker logs todos-api --tail 10"
+                        error("Todos API startup failed")
+                    }
+                }
+            }
+        }
+        
+        stage('Start Log Message Processor') {
+            steps {
+                script {
+                    echo "📊 Iniciando Log Message Processor..."
+                    sh "docker start log-message-processor"
+                    
+                    echo "⏳ Esperando que Log Processor se inicialice..."
+                    sleep(5)
+                    
+                    // Verificar que Log Processor está corriendo
+                    def isRunning = sh(
+                        script: "docker ps -q -f name=log-message-processor",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (isRunning) {
+                        echo "✅ Log Message Processor iniciado correctamente"
+                        sh "docker logs log-message-processor --tail 3"
+                    } else {
+                        echo "❌ Log Message Processor falló al iniciar"
+                        sh "docker logs log-message-processor --tail 10"
+                        error("Log Message Processor startup failed")
+                    }
+                }
+            }
+        }
+        
+        stage('Start Frontend') {
+            steps {
+                script {
+                    echo "🖥️ Iniciando Frontend..."
+                    sh "docker start frontend"
+                    
+                    echo "⏳ Esperando que Frontend se inicialice..."
+                    sleep(10)
+                    
+                    // Verificar que Frontend está corriendo
+                    def isRunning = sh(
+                        script: "docker ps -q -f name=frontend",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (isRunning) {
+                        echo "✅ Frontend iniciado correctamente"
+                        
+                        // Intentar health check
+                        def healthCheck = sh(
+                            script: "curl -f http://localhost:${FRONTEND_PORT}/ -o /dev/null -w '%{http_code}' || echo 'Health check failed'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        echo "🔍 Frontend health check: ${healthCheck}"
+                    } else {
+                        echo "❌ Frontend falló al iniciar"
+                        sh "docker logs frontend --tail 10"
+                        error("Frontend startup failed")
+                    }
+                }
+            }
+        }
+        
+        stage('Final Health Check') {
+            steps {
+                script {
+                    echo "🏥 Realizando verificación final de salud de todos los servicios..."
+                    
+                    // Mostrar estado de todos los contenedores
+                    sh """
+                        echo "📊 Estado final de todos los servicios:"
+                        echo "════════════════════════════════════════════════════════════════════════════════"
+                        docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}" | grep -E "(redis|auth-api|users-api|todos-api|log-message-processor|frontend)"
+                        echo "════════════════════════════════════════════════════════════════════════════════"
+                    """
+                    
+                    // Health checks específicos
+                    echo "🔍 Ejecutando health checks..."
+                    
+                    // Redis
+                    def redisCheck = sh(
+                        script: "docker exec redis redis-cli ping 2>/dev/null || echo 'FAIL'",
+                        returnStdout: true
+                    ).trim()
+                    echo "🔴 Redis: ${redisCheck == 'PONG' ? '✅ OK' : '❌ FAIL'}"
+                    
+                    // Auth API
+                    def authCheck = sh(
+                        script: "curl -f -s http://localhost:${AUTH_API_PORT}/version || echo 'FAIL'",
+                        returnStdout: true
+                    ).trim()
+                    echo "🔐 Auth API: ${authCheck.contains('Auth API') ? '✅ OK' : '❌ FAIL'}"
+                    
+                    // Frontend
+                    def frontendCheck = sh(
+                        script: "curl -f -s -o /dev/null -w '%{http_code}' http://localhost:${FRONTEND_PORT}/ || echo 'FAIL'",
+                        returnStdout: true
+                    ).trim()
+                    echo "🖥️ Frontend: ${frontendCheck == '200' ? '✅ OK' : '❌ FAIL'}"
+                    
+                    // Verificar logs por errores críticos
+                    echo "📋 Revisando logs por errores críticos..."
+                    sh """
+                        echo "🔍 Últimos logs de cada servicio:"
+                        echo "--- Auth API ---"
+                        docker logs auth-api --tail 3 2>/dev/null || echo "No logs available"
+                        echo "--- Users API ---" 
+                        docker logs users-api --tail 3 2>/dev/null || echo "No logs available"
+                        echo "--- Todos API ---"
+                        docker logs todos-api --tail 3 2>/dev/null || echo "No logs available"
+                    """
+                }
+            }
+        }
+        
+        stage('Service Discovery Check') {
+            steps {
+                script {
+                    echo "🌐 Verificando conectividad entre servicios..."
+                    
+                    // Verificar que los servicios pueden comunicarse entre sí a través de la red Docker
+                    try {
+                        sh """
+                            echo "🔍 Probando conectividad interna:"
+                            docker exec auth-api ping -c 1 users-api >/dev/null && echo "✅ Auth API -> Users API: OK" || echo "❌ Auth API -> Users API: FAIL"
+                            docker exec todos-api ping -c 1 redis >/dev/null && echo "✅ Todos API -> Redis: OK" || echo "❌ Todos API -> Redis: FAIL"
+                            docker exec log-message-processor ping -c 1 redis >/dev/null && echo "✅ Log Processor -> Redis: OK" || echo "❌ Log Processor -> Redis: FAIL"
+                        """
+                    } catch (Exception e) {
+                        echo "⚠️ Algunos checks de conectividad fallaron, pero los servicios pueden estar funcionando"
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo """
+            🎉 ¡TODOS LOS SERVICIOS INICIADOS EXITOSAMENTE!
+            
+            🚀 Servicios activos:
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            🔴 Redis              → localhost:6379             [Base de datos]
+            🔐 Auth API           → http://localhost:${AUTH_API_PORT}     [Autenticación]  
+            👥 Users API          → http://localhost:${USERS_API_PORT}     [Gestión de usuarios]
+            📝 Todos API          → http://localhost:${TODOS_API_PORT}     [Gestión de tareas]
+            📊 Log Processor      → [Procesamiento de logs]
+            🖥️ Frontend           → http://localhost:${FRONTEND_PORT}     [Interfaz de usuario]
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            
+            🌟 ¡LA APLICACIÓN ESTÁ LISTA PARA USAR!
+            
+            📱 Accede a la aplicación: http://localhost:${FRONTEND_PORT}
+            
+            🔑 Usuarios de prueba:
+            ─────────────────────────────────────────────────────────────────────────────
+            📋 admin / admin    (Administrador)
+            📋 johnd / foo      (Usuario)  
+            📋 janed / ddd      (Usuario)
+            ─────────────────────────────────────────────────────────────────────────────
+            
+            🛠️ Comandos útiles:
+            • Ver logs: docker logs <service-name>
+            • Estado: docker ps
+            • Detener todos: Ejecutar Jenkinsfile-Destroy
+            
+            💡 Flujo de trabajo completo:
+            1. ✅ Build    (Jenkinsfile-Build)    → Crear imágenes  
+            2. ✅ Create   (Jenkinsfile-Create)   → Crear contenedores
+            3. ✅ Start    (Jenkinsfile-Start)    → Iniciar servicios
+            4. 🔄 Destroy  (Jenkinsfile-Destroy) → Limpiar todo
+            """
+            
+            script {
+                sh """
+                    echo ""
+                    echo "📊 Resumen final del sistema:"
+                    echo "Contenedores corriendo: \$(docker ps | grep -E '(redis|auth-api|users-api|todos-api|log-message-processor|frontend)' | wc -l)/6"
+                    echo "Uso de memoria:"
+                    docker stats --no-stream --format "table {{.Name}}\\t{{.CPUPerc}}\\t{{.MemUsage}}" | head -7
+                """
+            }
+        }
+        
+        failure {
+            echo """
+            ❌ FALLÓ EL INICIO DE LOS SERVICIOS
+            
+            🔍 Servicios que pueden estar fallando:
+            """
+            
+            script {
+                sh """
+                    echo "📊 Estado actual de contenedores:"
+                    docker ps -a --format "table {{.Names}}\\t{{.Status}}" | grep -E "(redis|auth-api|users-api|todos-api|log-message-processor|frontend)"
+                    
+                    echo ""
+                    echo "🔍 Logs de servicios que fallaron:"
+                    for service in redis auth-api users-api todos-api log-message-processor frontend; do
+                        if ! docker ps -q -f name=\$service | grep -q .; then
+                            echo "--- \$service (FAILED) ---"
+                            docker logs \$service --tail 5 2>/dev/null || echo "No logs available"
+                            echo ""
+                        fi
+                    done
+                """
+            }
+            
+            echo """
+            
+            🛠️ Pasos para diagnosticar:
+            1. Revisar logs: docker logs <service-name>
+            2. Verificar imágenes: docker images | grep microservices
+            3. Verificar contenedores: docker ps -a
+            4. Reintentar: Ejecutar este pipeline nuevamente
+            
+            🔄 Si el problema persiste:
+            • Ejecutar Jenkinsfile-Destroy
+            • Ejecutar Jenkinsfile-Build  
+            • Ejecutar Jenkinsfile-Create
+            • Ejecutar Jenkinsfile-Start
+            """
+        }
+    }
+}
