@@ -9,7 +9,7 @@ pipeline {
         }
         stage('Bajar servicios con Docker Compose') {
             steps {
-                sh 'docker compose down'
+                sh 'docker-compose down'
             }
         }
     }
