@@ -1,0 +1,16 @@
+// Jenkinsfile-down
+pipeline {
+    agent any
+    stages {
+        stage('Clonar repositorio de desarrollo') {
+            steps {
+                git url: 'https://github.com/SantiagoAngel007/microservice-app-example.git', branch: 'feature/test-startup'
+            }
+        }
+        stage('Bajar servicios con Docker Compose') {
+            steps {
+                sh 'docker compose down'
+            }
+        }
+    }
+}
