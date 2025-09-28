@@ -1,16 +1,85 @@
-// Jenkinsfile-down
 pipeline {
     agent any
     stages {
+        stage('Limpiar workspace') {
+            steps {
+                deleteDir()
+            }
+        }
         stage('Clonar repositorio de desarrollo') {
             steps {
                 git url: 'https://github.com/SantiagoAngel007/microservice-app-example.git', branch: 'feature/test-startup'
             }
         }
-        stage('Bajar servicios con Docker Compose') {
+        stage('Parar servicios con Docker Compose') {
             steps {
-                sh 'docker-compose down'
+                script {
+                    sh 'docker-compose down --volumes --remove-orphans || true'
+                }
             }
+        }
+        stage('Eliminar contenedores específicos') {
+            steps {
+                script {
+                    sh '''
+                        echo "=== Eliminando contenedores específicos ==="
+                        docker stop redis-todo zipkin users-api auth-api todos-api frontend log-message-processor 2>/dev/null || true
+                        docker rm redis-todo zipkin users-api auth-api todos-api frontend log-message-processor 2>/dev/null || true
+                    '''
+                }
+            }
+        }
+        stage('Limpiar imágenes del proyecto') {
+            steps {
+                script {
+                    sh '''
+                        echo "=== Eliminando imágenes del proyecto ==="
+                        docker images | grep -E "(microservice|auth-api|users-api|todos-api|frontend|log-message-processor)" | awk '{print $3}' | xargs -r docker rmi -f || true
+                    '''
+                }
+            }
+        }
+        stage('Limpiar recursos Docker') {
+            steps {
+                script {
+                    sh 'docker system prune -af --volumes || true'
+                }
+            }
+        }
+        stage('Verificar limpieza') {
+            steps {
+                script {
+                    sh '''
+                        echo "=== Estado después de la limpieza ==="
+                        echo "Contenedores activos:"
+                        docker ps || true
+                        echo ""
+                        echo "Todos los contenedores:"
+                        docker ps -a || true
+                        echo ""
+                        echo "Imágenes disponibles:"
+                        docker images || true
+                    '''
+                }
+            }
+        }
+    }
+    post {
+        always {
+            script {
+                sh '''
+                    echo "=== Resumen final ==="
+                    echo "Contenedores corriendo: $(docker ps --format '{{.Names}}' | wc -l)"
+                    echo "Contenedores totales: $(docker ps -a --format '{{.Names}}' | wc -l)"
+                    echo "Imágenes totales: $(docker images -q | wc -l)"
+                '''
+            }
+        }
+        success {
+            echo 'Limpieza completada exitosamente. Listo para ejecutar Jenkinsfile-up'
+        }
+        failure {
+            echo 'Error durante la limpieza. Verificar logs.'
         }
     }
 }
