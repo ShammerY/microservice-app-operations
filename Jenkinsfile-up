@@ -1,16 +1,42 @@
 pipeline {
     agent any
     stages {
+        stage('Limpiar workspace') {
+            steps {
+                deleteDir()
+            }
+        }
         stage('Clonar repositorio de desarrollo') {
             steps {
                 git url: 'https://github.com/SantiagoAngel007/microservice-app-example.git', branch: 'feature/test-startup'
             }
         }
+        stage('Limpiar contenedores previos') {
+            steps {
+                script {
+                    sh 'docker-compose down --remove-orphans || true'
+                    sh 'docker system prune -f || true'
+                }
+            }
+        }
         stage('Levantar servicios con Docker Compose') {
             steps {
-                sh 'docker-compose up -d --build'
+                sh 'docker-compose up -d --build --force-recreate'
+            }
+        }
+        stage('Verificar servicios') {
+            steps {
+                script {
+                    sh 'docker-compose ps'
+                    sh 'sleep 30' // Esperar que los servicios se inicien completamente
+                }
             }
         }
     }
+    post {
+        failure {
+            sh 'docker-compose logs'
+            sh 'docker-compose down'
+        }
+    }
 }
-
